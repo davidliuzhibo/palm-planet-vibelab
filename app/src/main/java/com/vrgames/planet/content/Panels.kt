@@ -95,13 +95,22 @@ fun Pill(c: PhysicalLengthConverter, text: String, color: Color = Dim, onClick: 
     )
 }
 
+/** Text on the smoked glass of the armillary stand (the frame model is added by the stage). */
+@Composable
+private fun Glass(c: PhysicalLengthConverter, width: Float, height: Float, content: @Composable () -> Unit) {
+    Column(
+        Modifier.width(c.m(width)).height(c.m(height)).padding(horizontal = c.m(0.018f), vertical = c.m(0.006f)),
+        verticalArrangement = Arrangement.spacedBy(c.m(0.006f), Alignment.CenterVertically),
+    ) { content() }
+}
+
 private fun stars(n: Int) = "★".repeat(n) + "☆".repeat(3 - n)
 
 private fun clock(s: Double): String = "%d:%02d".format(s.toInt() / 60, s.toInt() % 60)
 
 @Composable
 fun CardPanel(c: PhysicalLengthConverter) {
-    PanelBox(c, 0.6f) {
+    Glass(c, 0.62f, 0.36f) {
         Game.version // Read in here: the same arguments, so the box would skip its content.
         Text("掌心星球", fontSize = c.sz(0.046f), color = Star)
         Text("一颗小星球在你面前。种下森林，放进鲸群，建起城市，看气候怎么变，最后把火箭送上天。", fontSize = c.sz(0.018f), color = Ink)
@@ -117,7 +126,7 @@ fun CardPanel(c: PhysicalLengthConverter) {
 
 @Composable
 fun IntroPanel(c: PhysicalLengthConverter) {
-    PanelBox(c, 0.56f) {
+    Glass(c, 0.58f, 0.34f) {
         Game.version
         val s = Game.stage
         Text("第 ${Stages.ALL.indexOf(s) + 1} 关 · ${s.title}", fontSize = c.sz(0.034f), color = Star)
@@ -145,9 +154,9 @@ private fun Reading(c: PhysicalLengthConverter, name: String, value: String, sha
 
 @Composable
 fun HudPanel(c: PhysicalLengthConverter, toggle: (String) -> Unit) {
-    PanelBox(c, 0.33f) {
+    Glass(c, 0.35f, 0.34f) {
         Game.version
-        val p = Game.play ?: return@PanelBox
+        val p = Game.play ?: return@Glass
         Text("第 ${Stages.ALL.indexOf(p.stage) + 1} 关 · ${p.stage.title}", fontSize = c.sz(0.02f), color = Star)
         Text("${p.era.title}时代　用时 ${clock(p.time)}", fontSize = c.sz(0.015f), color = Sky)
         val t = p.temp
@@ -175,9 +184,9 @@ fun HudPanel(c: PhysicalLengthConverter, toggle: (String) -> Unit) {
 /** What can be built on the tile in front. */
 @Composable
 fun BuildPanel(c: PhysicalLengthConverter) {
-    PanelBox(c, 0.33f) {
+    Glass(c, 0.35f, 0.36f) {
         Game.version
-        val p = Game.play ?: return@PanelBox
+        val p = Game.play ?: return@Glass
         val t = p.selected?.let { p.tiles[it] }
         Text(
             when {
@@ -204,11 +213,17 @@ fun BuildPanel(c: PhysicalLengthConverter) {
 
 @Composable
 fun ResultPanel(c: PhysicalLengthConverter, toggle: (String) -> Unit) {
-    PanelBox(c, 0.56f) {
+    Glass(c, 0.58f, 0.46f) {
         Game.version
-        val p = Game.play ?: return@PanelBox
+        val p = Game.play ?: return@Glass
         if (p.won) {
             Text("${p.stage.title}　${stars(p.stars())}", fontSize = c.sz(0.034f), color = Star)
+            val l = com.vrgames.planet.core.Science.of(com.vrgames.planet.core.Stages.ALL.indexOf(p.stage))
+            Row(horizontalArrangement = Arrangement.spacedBy(c.m(0.01f)), verticalAlignment = Alignment.CenterVertically) {
+                Text(l.title, fontSize = c.sz(0.018f), color = Star)
+                Pill(c, if (Game.speaking == l.id) "■ 停止" else "▶ 听讲解", Star) { if (Game.speaking == l.id) Game.stopNarration() else Game.speak(l.id) }
+            }
+            Text(l.text, fontSize = c.sz(0.0155f), color = Ink)
             Text("用时 ${clock(p.time)}，人口 ${p.people}，气温 %.1f℃。".format(p.temp), fontSize = c.sz(0.018f), color = Ink)
             if (p.stars() < 3) Text("三星：${clock(p.stage.par)} 内完成，气候一次也没有失控。", fontSize = c.sz(0.015f), color = Dim)
         } else {
@@ -237,7 +252,7 @@ fun ResultPanel(c: PhysicalLengthConverter, toggle: (String) -> Unit) {
 
 @Composable
 fun ShowPanel(c: PhysicalLengthConverter) {
-    PanelBox(c, 0.3f) {
+    Glass(c, 0.32f, 0.17f) {
         Text("群星之夜", fontSize = c.sz(0.03f), color = Star)
         Text("十二关全部三星。这颗星球把火箭一枚枚送上了天。", fontSize = c.sz(0.017f), color = Ink)
         Pill(c, "结束") { Game.endShow() }

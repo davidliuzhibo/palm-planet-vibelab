@@ -192,7 +192,7 @@ fun PlanetStage() {
         },
         initial = { content, attachments ->
             content.addEntity(Entity().apply {
-                components.set(DirectionalLightComponent(Color(0xFFFFE9D0).toColor4(), 1000f, true))
+                components.set(DirectionalLightComponent(Color(0xFFFFE9D0).toColor4(), 1000f, false))
                 components[TransformComponent::class.java]?.setEulerAngles(EulerAngles(-65f, 15f, 0f))
             })
             val tex = HashMap<String, TextureResource>()
@@ -207,6 +207,7 @@ fun PlanetStage() {
                 ibl = runCatching { TextureResource.load("textures/ibl_space.ktx", LoadType.FROM_ASSETS, TextureCreateOption().apply { textureEncoding = TextureEncoding.LINEAR }).shared() }.getOrNull()
             }
             val models = HashMap<String, Entity>()
+            for (name in PANEL_FRAMES.values) runCatching { Entity.loadSuspend("asset://panels/$name.glb") }.onSuccess { frames[name] = it }
             for (name in MODELS) {
                 runCatching { Entity.loadSuspend("asset://models/$name.glb") }
                     .onSuccess { models[name] = it }
@@ -255,6 +256,10 @@ private fun setSky(e: Entity, m: com.pico.spatial.core.ecs.resource.Material) {
 private val TEXTURES = listOf("clouds")
 private val MODELS = listOf("sky", "city", "village", "forest", "mountain", "volcano", "windfarm", "rocket", "satellite", "whale", "dome", "trophy")
 
+/** The thick armillary frames behind the panels (tools/panel3d), loaded by the stage. */
+private val PANEL_FRAMES = mapOf(PANEL_CARD to "panel_card", PANEL_INTRO to "panel_intro", PANEL_RESULT to "panel_result", PANEL_SHOW to "panel_show", PANEL_HUD to "panel_hud", PANEL_BUILD to "panel_build")
+private val frames = HashMap<String, Entity>()
+
 private fun attach(seat: Seat, a: SpatialViewAttachments, panels: HashMap<String, Entity>) {
     val world = seat.world ?: return
     fun put(id: String, pos: Vector3, pitch: Float, yaw: Float = 0f) {
@@ -263,6 +268,7 @@ private fun attach(seat: Seat, a: SpatialViewAttachments, panels: HashMap<String
         panels[id] = e
         world.addChild(e)
         e.setPos(pos)
+        PANEL_FRAMES[id]?.let { name -> frames[name]?.let { f -> f.setPos(Vector3(0f, 0f, -0.006f)); e.addChild(f) } }
         e.transform().eulerAngles = EulerAngles(pitch, yaw, 0f)
     }
     // Cards beside the planet, clear of it from the seat, the controls at the left: all turned toward the player.

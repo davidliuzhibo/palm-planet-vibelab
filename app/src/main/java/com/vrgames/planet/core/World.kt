@@ -10,6 +10,19 @@ import kotlin.math.sqrt
 
 enum class Terrain { OCEAN, LAND, MOUNTAIN, VOLCANO }
 
+/** A little real science behind the game, for the result card and the narrator (narration/<id>.ogg). */
+class Lore(val id: String, val title: String, val text: String)
+
+object Science {
+    val LORE = listOf(
+        Lore("forest", "森林和碳", "森林是地球的碳库。树木吸收二氧化碳，把碳存进木头和土壤。全世界的陆地生态系统，每年大约吸收人类排放的三成。这也是砍伐森林会让气候更快变暖的原因。"),
+        Lore("whale", "鲸鱼的碳泵", "鲸鱼也能帮地球固碳。它们的粪便富含铁和氮，能养活海面的浮游植物，而浮游植物吸收二氧化碳。一头大鲸死后沉入海底，体内的碳也一起被带到了深海。"),
+        Lore("volcano", "火山和气候", "火山喷发会放出二氧化碳，也会把灰尘和硫酸盐送上高空，挡住阳光，让全球短暂变冷。1991 年菲律宾皮纳图博火山喷发后，全球平均气温下降了大约半度。"),
+        Lore("rocket", "走出地球", "要绕着地球飞，火箭得达到每秒约七点九公里的第一宇宙速度。人类第一颗人造卫星在 1957 年升空。今天的气象卫星能提前发现寒潮和台风，让我们更早做好准备。"),
+    )
+    fun of(stageIndex: Int) = LORE[((stageIndex % LORE.size) + LORE.size) % LORE.size]
+}
+
 /** What can stand on a tile. */
 enum class Build(val title: String, val cost: Int, val onOcean: Boolean, val needs: Era, val line: String) {
     FOREST("森林", 2, false, Era.TRIBE, "吸收二氧化碳，让村庄长成城市。"),

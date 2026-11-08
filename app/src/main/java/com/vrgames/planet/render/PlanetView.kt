@@ -39,7 +39,7 @@ import kotlin.math.sqrt
  * is in spin's frame, on the unit sphere times [R]. The surface is painted once per level from land
  * and ocean pictures by each tile's terrain; the air's color follows the temperature.
  */
-class PlanetView(private val models: Map<String, Entity>, private val tex: Map<String, TextureResource>, private val assets: AssetManager) {
+class PlanetView(val models: Map<String, Entity>, private val tex: Map<String, TextureResource>, private val assets: AssetManager) {
     val root = Entity()
     val spin = Entity()
     private var surface = Entity().also { spin.addChild(it) }
@@ -195,14 +195,14 @@ class PlanetView(private val models: Map<String, Entity>, private val tex: Map<S
 
     /** The surface for this level: land where land tiles are, sea elsewhere, a wavy coast between. */
     private fun paint(p: Play): TextureResource {
-        val w = 1024
-        val h = 512
+        val w = 2048
+        val h = 1024
         val land = picture("land")
         val sea = picture("ocean")
         val out = IntArray(w * h)
         // A coarse map of which tile is nearest, then the coast smoothed by a little noise.
-        val cw = 192
-        val ch = 96
+        val cw = 384
+        val ch = 192
         val isLand = FloatArray(cw * ch)
         for (j in 0 until ch) for (i in 0 until cw) {
             val lon = 2 * PI * i / cw - PI
@@ -328,6 +328,17 @@ class PlanetView(private val models: Map<String, Entity>, private val tex: Map<S
         idle = 0.0
     }
 
+    private var cloudDrift = 0.0
+    private var lapse = -1.0
+    private var lapseRockets = 0
+
+    /** The reward for a planet looked after: the years race by, clouds streaming, rockets going up. */
+    fun timelapse() {
+        lapse = 0.0
+        lapseRockets = 0
+        idle = 0.0
+    }
+
     fun launch(id: Int) {
         val t = played?.tiles?.getOrNull(id) ?: return
         val e = clone("rocket") ?: return
@@ -370,7 +381,24 @@ class PlanetView(private val models: Map<String, Entity>, private val tex: Map<S
         yaw += d * k
         pitch += (wantPitch - pitch) * k
         spin.transform().eulerAngles = EulerAngles(pitch, yaw, 0f)
-        clouds.transform().eulerAngles = EulerAngles(pitch * 0.9f, yaw + (clock * 1.5).toFloat(), 0f)
+        cloudDrift += dt * (if (lapse >= 0) 60.0 else 1.5)
+        clouds.transform().eulerAngles = EulerAngles(pitch * 0.9f, yaw + cloudDrift.toFloat(), 0f)
+        if (lapse >= 0) {
+            lapse += dt
+            val k = (lapse / LAPSE_S).coerceIn(0.0, 1.0)
+            // Fast in the middle, easing in and out: two turns of the planet over the show.
+            wantYaw += (dt * 150 * sin(k * PI)).toFloat()
+            if ((lapse * 4).toInt() != ((lapse - dt) * 4).toInt()) {
+                val a = lapse * 2.3
+                stars.emit(Vec3(sin(a) * R * 1.3, cos(a * 0.6) * R * 1.1, cos(a) * R * 0.6), 18, 0.18, 1.3, 0.004f)
+            }
+            if (lapseRockets < 3 && lapse > 1.2 + lapseRockets * 1.6) {
+                lapseRockets++
+                val sites = p.tiles.filter { it.city || it.build != null }.ifEmpty { p.tiles }
+                launch(sites[(lapseRockets * 7) % sites.size].id)
+            }
+            if (k >= 1.0) lapse = -1.0
+        }
         val state = if (p.temp > Play.HOT_LIMIT - 3) 2 else if (p.temp < Play.COLD_LIMIT + 3) 0 else 1
         if (state != airState) {
             airState = state
@@ -425,6 +453,7 @@ class PlanetView(private val models: Map<String, Entity>, private val tex: Map<S
     fun receiveAll() = receive(root)
 
     companion object {
+        const val LAPSE_S = 7.0
         const val R = 0.22f
         /** The pinch box of a tile: tiles stand about 0.6 R apart, so this overlaps its neighbors. */
         const val PAD = 0.5f * R

@@ -65,6 +65,7 @@ object Game {
     val trophies get() = if (gold) 3 else if (silver) 2 else if (bronze) 1 else 0
 
     fun init(context: Context) {
+        appContext = context.applicationContext
         if (prefs != null) return
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).also { p ->
             musicOn = p.getBoolean("music", true)
@@ -116,14 +117,16 @@ object Game {
         version++
     }
 
-    fun retry() = begin()
+    fun retry() { stopNarration(); begin() }
 
     fun next() {
+        stopNarration()
         val k = Stages.ALL.indexOf(stage)
         if (k + 1 < Stages.ALL.size) intro(Stages.ALL[k + 1]) else toCard()
     }
 
     fun toCard() {
+        stopNarration()
         phase = Phase.CARD
         version++
     }
@@ -193,6 +196,36 @@ object Game {
         view?.rebuildTiles()
     }
 
+    /** The narration clip now playing, or null. */
+    var speaking by mutableStateOf<String?>(null); private set
+    private var narrator: android.media.MediaPlayer? = null
+    private var appContext: Context? = null
+
+    fun speak(id: String) {
+        stopNarration()
+        val c = appContext ?: return
+        runCatching {
+            val fd = c.assets.openFd("narration/$id.ogg")
+            narrator = android.media.MediaPlayer().apply {
+                setDataSource(fd.fileDescriptor, fd.startOffset, fd.length)
+                fd.close()
+                setOnCompletionListener { stopNarration() }
+                prepare()
+                start()
+            }
+            speaking = id
+            music?.ducked = true
+        }.onFailure { Log.i(TAG, "narration $id: ${it.message}") }
+    }
+
+    fun stopNarration() {
+        runCatching { narrator?.stop() }
+        runCatching { narrator?.release() }
+        narrator = null
+        speaking = null
+        music?.ducked = false
+    }
+
     private fun finish(won: Boolean) {
         val p = play ?: return
         if (phase != Phase.PLAYING) return
@@ -204,6 +237,12 @@ object Game {
         save()
         phase = Phase.RESULT
         sound?.play(if (won) Sfx.FANFARE else Sfx.LOSE)
+        if (won) {
+            // The reward: the years race by on the planet you looked after, and a little science to go with it.
+            view?.timelapse()
+            val l = com.vrgames.planet.core.Science.of(com.vrgames.planet.core.Stages.ALL.indexOf(p.stage))
+            speak(l.id)
+        }
         Log.i(TAG, "finish ${p.stage.id} won=$won stars=${p.stars()} time=${"%.1f".format(p.time)} people=${p.people} temp=${"%.1f".format(p.temp)}")
         version++
     }
