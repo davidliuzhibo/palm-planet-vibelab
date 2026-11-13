@@ -51,6 +51,8 @@ object AutoPilot {
             "show" -> Game.show()
             "speed" -> Game.timeScale = id?.toDoubleOrNull() ?: 1.0
             "view" -> Game.debugView = id?.takeIf { it != "reset" }
+            "hold" -> Game.hold(id?.let { n -> com.vrgames.planet.core.Build.entries.firstOrNull { it.name.equals(n, true) } })
+            "spin" -> id?.split(",")?.mapNotNull { it.trim().toFloatOrNull() }?.takeIf { it.size == 2 }?.let { (y, p) -> Game.view?.spinBy(y, p) }
             "open" -> Game.debugOpen = id
             "reset" -> { main.removeCallbacksAndMessages(null); Game.restart() }
             "stop" -> main.removeCallbacksAndMessages(null)

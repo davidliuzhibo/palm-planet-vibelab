@@ -52,6 +52,10 @@ class PlanetView(val models: Map<String, Entity>, private val tex: Map<String, T
     private val hoverMat = glow(color(1f, 1f, 1f, 0.004f)).shared()
     private val ringMat = glow(color(1f, 0.85f, 0.4f, 0.8f)).shared()
     private val ring = model(MeshResource.createTorus(R * 0.3f, R * 0.012f), ringMat).apply { enabled = false }.also { spin.addChild(it) }
+    // Where the thing in hand would go: green if it can, red if not.
+    private val okMat = glow(color(0.35f, 1f, 0.55f, 0.9f)).shared()
+    private val noMat = glow(color(1f, 0.35f, 0.3f, 0.9f)).shared()
+    private val hoverRing = model(MeshResource.createTorus(R * 0.24f, R * 0.016f), okMat).apply { enabled = false }.also { spin.addChild(it) }
     private val air = model(sphere, rim(color(0.3f, 0.6f, 1f, 0.42f))).apply { setScale(R * 1.07f) }.also { root.addChild(it) }
     private var airState = -1
     private val airMats = listOf(
@@ -306,17 +310,29 @@ class PlanetView(val models: Map<String, Entity>, private val tex: Map<String, T
                 Build.WHALE -> place("whale", t, R * 1.005f)?.let { things.addChild(it) }
                 Build.WIND -> place("windfarm", t)?.let { things.addChild(it) }
                 Build.DOME -> place("dome", t)?.let { things.addChild(it) }
+                Build.FARM -> place("farm", t)?.let { things.addChild(it) }
+                Build.MANGROVE -> place("mangrove", t)?.let { things.addChild(it) }
+                Build.REEF -> place("reef", t, R * 1.002f)?.let { things.addChild(it) }
+                Build.SOLAR -> place("solar", t)?.let { things.addChild(it) }
+                // On the mountain's shoulder, a little out from its peak.
+                Build.HYDRO -> place("hydro", t, R * 1.04f)?.let { things.addChild(it) }
+                Build.PORT -> place("port", t)?.let { things.addChild(it) }
             }
         }
         receive(things)
     }
 
-    /** Brings a tile to the front. */
-    fun face(id: Int) {
+    /**
+     * Marks a tile as chosen; with [turn], also brings it to the front. Since 2026-11-12 a pinch only
+     * marks it (the review: turning on every pinch fought the hand); the planet turns by dragging.
+     */
+    fun face(id: Int, turn: Boolean = false) {
         val p = played ?: return
         val t = p.tiles.getOrNull(id) ?: return
-        wantYaw = Math.toDegrees(-atan2(t.x, t.z)).toFloat()
-        wantPitch = Math.toDegrees(atan2(t.y, sqrt(t.x * t.x + t.z * t.z))).toFloat().coerceIn(-65f, 65f)
+        if (turn) {
+            wantYaw = Math.toDegrees(-atan2(t.x, t.z)).toFloat()
+            wantPitch = Math.toDegrees(atan2(t.y, sqrt(t.x * t.x + t.z * t.z))).toFloat().coerceIn(-65f, 65f)
+        }
         idle = 0.0
         ring.enabled = true
         ring.setPos(at(t, R * 1.012f))
@@ -326,6 +342,28 @@ class PlanetView(val models: Map<String, Entity>, private val tex: Map<String, T
     fun turn(dir: Int) {
         wantYaw += dir * 40f
         idle = 0.0
+    }
+
+    /**
+     * The planet held and turned by hand: [dYaw] about the vertical, [dPitch] tipping it toward the
+     * player (degrees). It follows at once, with a little glide left when let go.
+     */
+    fun spinBy(dYaw: Float, dPitch: Float) {
+        yaw += dYaw
+        pitch = (pitch + dPitch).coerceIn(-70f, 70f)
+        wantYaw = yaw + dYaw * 4f
+        wantPitch = (pitch + dPitch * 4f).coerceIn(-70f, 70f)
+        idle = 0.0
+    }
+
+    /** Shows where the thing in hand would go ([ok]: it can), or nothing. */
+    fun hover(id: Int?, ok: Boolean) {
+        val t = id?.let { played?.tiles?.getOrNull(it) }
+        hoverRing.enabled = t != null
+        if (t == null) return
+        setMaterials(hoverRing, if (ok) okMat else noMat)
+        hoverRing.setPos(at(t, R * 1.015f))
+        hoverRing.transform().setQuaternion(quatFromY(Vec3(t.x, t.y, t.z)))
     }
 
     private var cloudDrift = 0.0
@@ -454,7 +492,8 @@ class PlanetView(val models: Map<String, Entity>, private val tex: Map<String, T
 
     companion object {
         const val LAPSE_S = 7.0
-        const val R = 0.22f
+        /** 0.30 m since 2026-11-12 (the review asked for a bigger planet; 0.22 before). */
+        const val R = 0.30f
         /** The pinch box of a tile: tiles stand about 0.6 R apart, so this overlaps its neighbors. */
         const val PAD = 0.5f * R
         const val Y = 1.2f

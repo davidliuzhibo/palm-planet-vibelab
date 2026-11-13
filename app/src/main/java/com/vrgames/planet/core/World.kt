@@ -32,6 +32,13 @@ enum class Build(val title: String, val cost: Int, val onOcean: Boolean, val nee
     DOME("穹顶基地", 6, false, Era.CITY, "封闭生态，不怕冷热，要用电。"),
     SATELLITE("卫星", 5, true, Era.CITY, "提前报告火山和寒潮，事件的伤害减半。"),
     ROCKET("火箭", 12, false, Era.SPACE, "文明走出这颗星球。要有人口，气候也要稳。"),
+    // 2026-11-12 (review: more to place): each changes the climate its own way.
+    FARM("农田", 2, false, Era.TRIBE, "旁边的村庄有粮，长成城市快一半；本身也排一点碳。"),
+    MANGROVE("红树林", 3, false, Era.TRIBE, "长在海边的陆地上，吸碳比森林还多。"),
+    REEF("珊瑚礁", 3, true, Era.TRIBE, "海里的宝库，带来造物点；气温超过 22℃ 太久会白化死去。"),
+    SOLAR("太阳能", 3, false, Era.TOWN, "干净的电，比风电便宜，电少一些。"),
+    HYDRO("水电站", 5, false, Era.TOWN, "只能建在雪山上，电最多。"),
+    PORT("港口", 5, false, Era.CITY, "建在海边，贸易带来很多造物点，也排一些碳。"),
 }
 
 /** How far a civilization has come, by its people. */
@@ -48,7 +55,7 @@ class Tile(val id: Int, val x: Double, val y: Double, val z: Double, var terrain
     val free get() = build == null && terrain != Terrain.VOLCANO && terrain != Terrain.MOUNTAIN
 }
 
-enum class GoalKind { PEOPLE, FORESTS, WHALES, STABLE, ROCKET, CO2_BELOW }
+enum class GoalKind { PEOPLE, FORESTS, WHALES, STABLE, ROCKET, CO2_BELOW, FARMS, MANGROVES, REEFS, HYDRO }
 
 class Goal(val kind: GoalKind, val n: Int, val text: String) {
     var met = false
@@ -162,6 +169,10 @@ class Play(val stage: Stage) {
         GoalKind.STABLE -> "气候稳定 $n 秒"
         GoalKind.ROCKET -> "发射火箭"
         GoalKind.CO2_BELOW -> "二氧化碳降到 $n 以下"
+        GoalKind.FARMS -> "$n 片农田"
+        GoalKind.MANGROVES -> "$n 片红树林"
+        GoalKind.REEFS -> "$n 片珊瑚礁"
+        GoalKind.HYDRO -> "$n 座水电站"
     }
 
     fun count(b: Build) = tiles.count { it.build == b }
@@ -176,8 +187,11 @@ class Play(val stage: Stage) {
             return base
         }
 
-    /** Electricity: + from the wind, - to the towns. */
-    val energy: Double get() = count(Build.WIND) * 3.0 - cities * 2.0 - count(Build.DOME) * 1.0
+    /** Electricity: + from the wind, the sun and the water, - to the towns. */
+    val energy: Double get() = count(Build.WIND) * 3.0 + count(Build.SOLAR) * 2.0 + count(Build.HYDRO) * 5.0 - cities * 2.0 - count(Build.DOME) * 1.0
+
+    /** Land touching the sea (for mangroves and ports). */
+    fun coastal(t: Tile) = t.terrain == Terrain.LAND && t.neighbors.any { tiles[it].terrain == Terrain.OCEAN }
 
     val livable get() = temp in COLD_LIMIT..HOT_LIMIT
 
@@ -185,10 +199,20 @@ class Play(val stage: Stage) {
     fun targetTemp(): Double = 14 + stage.sun + 0.2 * (co2 - 40) - (if (cold > 0) 9.0 else 0.0)
 
     /** How fast the air's carbon moves per second. */
-    fun co2Rate(): Double = cities * 0.3 + villages * 0.04 + count(Build.DOME) * 0.03 - count(Build.FOREST) * 0.14 - count(Build.WHALE) * 0.1
+    fun co2Rate(): Double = cities * 0.3 + villages * 0.04 + count(Build.DOME) * 0.03 + count(Build.FARM) * 0.02 + count(Build.PORT) * 0.06 -
+        count(Build.FOREST) * 0.14 - count(Build.WHALE) * 0.1 - count(Build.MANGROVE) * 0.22 - count(Build.REEF) * 0.04
+
+    /** Creation points a second: a base, the people, the reefs and the ports. */
+    fun income(): Double = 0.3 + people / 300.0 + count(Build.REEF) * 0.12 + count(Build.PORT) * 0.3
 
     fun canBuild(b: Build, t: Tile): String? {
-        if (!t.free) return if (t.terrain == Terrain.VOLCANO) "这里是火山，什么也放不了。" else if (t.terrain == Terrain.MOUNTAIN) "雪山上放不了东西。" else "这里已经有${t.build?.title}了。"
+        if (b == Build.HYDRO) {
+            if (t.terrain != Terrain.MOUNTAIN) return "水电站要建在雪山上。"
+            if (t.build != null) return "这座雪山上已经有水电站了。"
+        } else if (t.terrain == Terrain.MOUNTAIN) return "雪山上只能建水电站。"
+        else if (!t.free) return if (t.terrain == Terrain.VOLCANO) "这里是火山，什么也放不了。" else "这里已经有${t.build?.title}了。"
+        if ((b == Build.MANGROVE || b == Build.PORT) && !coastal(t)) return "${b.title}要建在挨着海的陆地上。"
+        if (t.terrain != Terrain.OCEAN && b == Build.REEF) return "珊瑚礁要放在海里。"
         if (t.terrain == Terrain.OCEAN && !b.onOcean) return "${b.title}要放在陆地上。"
         if (t.terrain != Terrain.OCEAN && b == Build.WHALE) return "鲸鱼要放在海里。"
         if (era.ordinal < b.needs.ordinal) return "${b.title}要到「${b.needs.title}」时代才有。"
@@ -248,7 +272,7 @@ class Play(val stage: Stage) {
     private fun tick(dt: Double) {
         time += dt
         if (cold > 0) cold -= dt
-        credits = min(99.0, credits + dt * (0.3 + people / 300.0))
+        credits = min(99.0, credits + dt * income())
         co2 = (co2 + co2Rate() * dt).coerceIn(5.0, 140.0)
         // A sea holds heat: the more ocean, the slower the climate turns.
         val inertia = 6 + 16 * oceanTiles.toDouble() / TILES
@@ -266,11 +290,22 @@ class Play(val stage: Stage) {
     }
 
     private fun grow(dt: Double) {
+        // Reefs bleach in a sea too warm for too long.
+        for (t in tiles) {
+            if (t.build != Build.REEF) continue
+            t.grow = if (temp > REEF_HOT) t.grow + dt else max(0.0, t.grow - dt)
+            if (t.grow >= BLEACH_S) {
+                t.build = null
+                t.grow = 0.0
+                events += Ev.Note("海水太热，一片珊瑚礁白化死去了。")
+            }
+        }
         for (t in tiles) {
             if (t.build != Build.VILLAGE || t.city) continue
-            val woods = t.neighbors.any { tiles[it].build == Build.FOREST }
+            val woods = t.neighbors.any { tiles[it].build == Build.FOREST || tiles[it].build == Build.FARM }
+            val fed = t.neighbors.any { tiles[it].build == Build.FARM }
             if (woods && energy >= 0 && livable) {
-                t.grow += dt
+                t.grow += dt * (if (fed) 1.5 else 1.0)
                 if (t.grow >= GROW_S) {
                     t.city = true
                     events += Ev.Grew(t.id)
@@ -361,6 +396,10 @@ class Play(val stage: Stage) {
                 GoalKind.STABLE -> stable >= g.n && people > 0
                 GoalKind.ROCKET -> launched
                 GoalKind.CO2_BELOW -> co2 < g.n
+                GoalKind.FARMS -> count(Build.FARM) >= g.n
+                GoalKind.MANGROVES -> count(Build.MANGROVE) >= g.n
+                GoalKind.REEFS -> count(Build.REEF) >= g.n
+                GoalKind.HYDRO -> count(Build.HYDRO) >= g.n
             }
             if (now && !g.met) {
                 g.met = true
@@ -374,6 +413,9 @@ class Play(val stage: Stage) {
         }
     }
 
+    /** Tests only: holds the climate at [t] degrees. */
+    internal fun debugHeat(t: Double) { temp = t }
+
     fun stars(): Int {
         if (!won) return 0
         return 1 + (if (time <= stage.par) 1 else 0) + (if (outside < 0.1 && maxOutside() == 0.0) 1 else 0)
@@ -386,7 +428,10 @@ class Play(val stage: Stage) {
     }
 
     companion object {
-        const val TILES = 36
+        /** 48 since 2026-11-12 (a bigger planet, 36 before). */
+        const val TILES = 48
+        const val REEF_HOT = 22.0
+        const val BLEACH_S = 12.0
         const val STEP = 0.1
         const val GROW_S = 20.0
         const val HOT_LIMIT = 24.0
@@ -417,6 +462,10 @@ class Governor(private val p: Play) {
         if (rocket && p.era == Era.SPACE && p.livable) return Build.ROCKET
         want(GoalKind.WHALES)?.let { return Build.WHALE }
         want(GoalKind.FORESTS)?.let { return Build.FOREST }
+        want(GoalKind.FARMS)?.let { return Build.FARM }
+        want(GoalKind.MANGROVES)?.let { return Build.MANGROVE }
+        want(GoalKind.REEFS)?.let { if (p.temp < Play.REEF_HOT - 1) return Build.REEF }
+        if (want(GoalKind.HYDRO) != null && p.era.ordinal >= Era.TOWN.ordinal) return Build.HYDRO
         // A village with no woods beside it can never grow: woods first.
         val lonely = p.tiles.any { t -> t.build == Build.VILLAGE && !t.city && t.neighbors.none { p.tiles[it].build == Build.FOREST } && t.neighbors.any { p.tiles[it].free && p.tiles[it].terrain == Terrain.LAND } }
         if (lonely) return Build.FOREST
@@ -438,6 +487,7 @@ class Governor(private val p: Play) {
 
     /** Villages beside woods, woods beside villages. */
     private fun spot(b: Build): Tile? {
+        if (b in SPECIAL) return p.tiles.firstOrNull { p.canBuild(b, it) == null }
         val open = p.tiles.filter { it.free && (if (b.onOcean && b == Build.WHALE) it.terrain == Terrain.OCEAN else if (b.onOcean) true else it.terrain == Terrain.LAND) }
         if (open.isEmpty()) return null
         return when (b) {
@@ -445,5 +495,10 @@ class Governor(private val p: Play) {
             Build.FOREST -> open.maxByOrNull { t -> t.neighbors.count { n -> p.tiles[n].build == Build.VILLAGE && p.tiles[n].neighbors.none { p.tiles[it].build == Build.FOREST } } * 3 + t.neighbors.count { p.tiles[it].free && p.tiles[it].terrain == Terrain.LAND } }
             else -> open.first()
         }
+    }
+
+    private companion object {
+        /** Placed where the rules allow, not by the village logic. */
+        val SPECIAL = setOf(Build.FARM, Build.MANGROVE, Build.REEF, Build.HYDRO, Build.PORT, Build.SOLAR)
     }
 }

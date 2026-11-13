@@ -36,7 +36,12 @@ import com.pico.spatial.ui.foundation.content.SpatialView
 import com.pico.spatial.ui.foundation.content.SpatialViewAttachments
 import com.pico.spatial.ui.foundation.content.toColor4
 import com.pico.spatial.ui.foundation.gesture.TargetEntity
+import com.pico.spatial.ui.foundation.gesture.detectSpatialDragGesture
 import com.pico.spatial.ui.foundation.gesture.detectSpatialPointerEvent
+import com.pico.spatial.ui.foundation.gesture.detectSpatialTapGesture
+import com.pico.spatial.ui.platform.LengthUnit
+import com.pico.spatial.core.container.SpatialViewContent
+import com.vrgames.planet.render.HandTurn
 import com.pico.spatial.ui.platform.LocalPhysicalLengthConverter
 import com.pico.spatial.ui.platform.containers.LocalSpatialNavigator
 import com.vrgames.planet.GUIDE_ID
@@ -55,6 +60,7 @@ import com.vrgames.planet.render.transform
 import com.vrgames.planet.render.unlit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -73,6 +79,9 @@ fun PlanetStage() {
     val subscription = remember { arrayOfNulls<Cancellable>(1) }
     var view by remember { mutableStateOf<PlanetView?>(null) }
     val seat = remember { Seat() }
+    val lastHover = remember { arrayOfNulls<Int>(1) }
+    val handTurn = remember { HandTurn() }
+    val contentRef = remember { arrayOfNulls<SpatialViewContent>(1) }
     val panels = remember { HashMap<String, Entity>() }
     val skies = remember { arrayOfNulls<TextureResource>(1) }
     val appVersion = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "" }
@@ -109,11 +118,17 @@ fun PlanetStage() {
             Game.music = it
         }
         val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
-            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) music.resume() else if (e == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) music.pause()
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) music.resume()
+            else if (e == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                music.pause()
+                // Home pressed mid-narration: the voice stops with the music (device test 2026-11-12).
+                Game.stopNarration()
+            }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
+            Game.stopNarration()
             music.release()
             Game.music = null
         }
@@ -154,17 +169,58 @@ fun PlanetStage() {
     }
 
     SpatialView(
-        Modifier.pointerInput(Unit) {
-            detectSpatialPointerEvent(context, TargetEntity.any()) { infos ->
-                val v = view
-                if (v != null) for (i in infos) {
-                    if (!i.isDownEvent()) continue
-                    val t = v.tileOf(i.targetedEntity) ?: continue
+        Modifier
+            // Where the eye or the ray rests, for the green or red ring of the thing in hand.
+            .pointerInput(0) {
+                detectSpatialPointerEvent(context, TargetEntity.any()) { infos ->
+                    val v = view
+                    if (v != null) for (i in infos) {
+                        val t = v.tileOf(i.targetedEntity)
+                        if (t != lastHover[0]) {
+                            lastHover[0] = t
+                            main.post { Game.hover(t) }
+                        }
+                    }
+                    false
+                }
+            }
+            // A still pinch: put down what is in hand there, or choose the tile.
+            .pointerInput(1) {
+                detectSpatialTapGesture(context, TargetEntity.any()) { value ->
+                    val t = view?.tileOf(value.targetEntity) ?: return@detectSpatialTapGesture
                     main.post { Game.tile(t) }
                 }
-                false
             }
-        },
+            // A pinch that moves turns the planet: by the hand's travel, or by its own turn (PICO's
+            // advice, 2026-11-12), whichever is larger. Anywhere on it, near or far (2026-11-09 review).
+            .pointerInput(2) {
+                fun meters(px: Float) = with(density) { converter.dpToLength(px.toDp(), LengthUnit.Meters) }
+                detectSpatialDragGesture(
+                    context = context,
+                    targetedToEntity = TargetEntity.any(),
+                    onDragStart = { _, value ->
+                        handTurn.reset()
+                        handTurn.twist(contentRef[0], runCatching { value.inputDevicePose.rawRotation.toQuaternion() }.getOrNull(), 0.0, 1.0, 0.0)
+                    },
+                ) { value ->
+                    val v = view ?: return@detectSpatialDragGesture
+                    if (Game.phase != Game.Phase.PLAYING && Game.phase != Game.Phase.INTRO) return@detectSpatialDragGesture
+                    val yaw = Math.toRadians(seat.yawDeg)
+                    val dx = meters(value.dragAmount.x).toDouble()
+                    val dz = meters(value.dragAmount.z).toDouble()
+                    val dy = -meters(value.dragAmount.y).toDouble()
+                    val across = dx * cos(yaw) - dz * sin(yaw)
+                    val raw = runCatching { value.inputDevicePose.rawRotation.toQuaternion() }.getOrNull()
+                    val twY = handTurn.twistPair(contentRef[0], raw, 0.0, 1.0, 0.0, cos(yaw), 0.0, -sin(yaw))
+                    val dragYaw = (across * Seat.DRAG_DEG_PER_M).toFloat()
+                    val dragPitch = (-dy * Seat.DRAG_DEG_PER_M).toFloat()
+                    val turnYaw = twY.first.toFloat()
+                    val turnPitch = twY.second.toFloat()
+                    val dYaw = if (abs(turnYaw) > abs(dragYaw)) turnYaw else dragYaw
+                    val dPitch = if (abs(turnPitch) > abs(dragPitch)) turnPitch else dragPitch
+                    main.post { v.spinBy(dYaw, dPitch) }
+                }
+            },
         attachments = {
             AttachmentPanel(PANEL_CARD) { CardPanel(converter) }
             AttachmentPanel(PANEL_INTRO) { IntroPanel(converter) }
@@ -191,6 +247,7 @@ fun PlanetStage() {
             }
         },
         initial = { content, attachments ->
+            contentRef[0] = content
             content.addEntity(Entity().apply {
                 components.set(DirectionalLightComponent(Color(0xFFFFE9D0).toColor4(), 1000f, false))
                 components[TransformComponent::class.java]?.setEulerAngles(EulerAngles(-65f, 15f, 0f))
@@ -254,12 +311,13 @@ private fun setSky(e: Entity, m: com.pico.spatial.core.ecs.resource.Material) {
 }
 
 private val TEXTURES = listOf("clouds")
-private val MODELS = listOf("sky", "city", "village", "forest", "mountain", "volcano", "windfarm", "rocket", "satellite", "whale", "dome", "trophy")
+private val MODELS = listOf("sky", "city", "village", "forest", "mountain", "volcano", "windfarm", "rocket", "satellite", "whale", "dome", "trophy", "farm", "mangrove", "reef", "solar", "hydro", "port")
 
 /** The thick armillary frames behind the panels (tools/panel3d), loaded by the stage. */
 private val PANEL_FRAMES = mapOf(PANEL_CARD to "panel_card", PANEL_INTRO to "panel_intro", PANEL_RESULT to "panel_result", PANEL_SHOW to "panel_show", PANEL_HUD to "panel_hud", PANEL_BUILD to "panel_build")
 private val frames = HashMap<String, Entity>()
 
+// The right-hand panels sit 8 cm further right than in 0.3: the planet hid their left edge (device test 2026-11-12).
 private fun attach(seat: Seat, a: SpatialViewAttachments, panels: HashMap<String, Entity>) {
     val world = seat.world ?: return
     fun put(id: String, pos: Vector3, pitch: Float, yaw: Float = 0f) {
@@ -272,12 +330,12 @@ private fun attach(seat: Seat, a: SpatialViewAttachments, panels: HashMap<String
         e.transform().eulerAngles = EulerAngles(pitch, yaw, 0f)
     }
     // Cards beside the planet, clear of it from the seat, the controls at the left: all turned toward the player.
-    put(PANEL_CARD, Vector3(0.64f, 1.25f, -0.9f), -3f, -32f)
-    put(PANEL_INTRO, Vector3(0.64f, 1.25f, -0.9f), -3f, -32f)
-    put(PANEL_RESULT, Vector3(0.64f, 1.25f, -0.9f), -3f, -32f)
+    put(PANEL_CARD, Vector3(0.72f, 1.25f, -0.9f), -3f, -32f)
+    put(PANEL_INTRO, Vector3(0.72f, 1.25f, -0.9f), -3f, -32f)
+    put(PANEL_RESULT, Vector3(0.72f, 1.25f, -0.9f), -3f, -32f)
     put(PANEL_SHOW, Vector3(-0.66f, 1.2f, -0.72f), -4f, 42f)
     put(PANEL_HUD, Vector3(-0.6f, 1.1f, -0.76f), -6f, 38f)
-    put(PANEL_BUILD, Vector3(0.6f, 1.05f, -0.76f), -8f, -38f)
+    put(PANEL_BUILD, Vector3(0.68f, 1.05f, -0.76f), -8f, -38f)
     put(PANEL_NOTE, Vector3(0f, 0.8f, -0.62f), -24f)
     put(PANEL_MENU, Vector3(-0.66f, 0.66f, -0.56f), -30f, 42f)
 }
@@ -290,6 +348,8 @@ private class Seat {
     var world: Entity? = null
     var machine: Entity? = null
     private val facing = com.vrgames.planet.core.Facing()
+    /** The world's turn about the vertical (degrees), once placed. */
+    val yawDeg get() = facing.yaw
     private var waited = 0.0
     private var shown = false
 
@@ -329,7 +389,10 @@ private class Seat {
 
     companion object {
         // The planet floats about 0.7 m out.
-        const val AHEAD = 1.05f
+        /** 1.15 m since the planet grew to 30 cm (2026-11-12). */
+        const val AHEAD = 1.15f
+        /** Planet degrees per meter the pinching hand travels. */
+        const val DRAG_DEG_PER_M = 360.0
     }
 }
 

@@ -99,6 +99,7 @@ object Game {
     }
 
     fun intro(s: Stage) {
+        holding = null
         if (!open(s)) {
             say("这一关还没开放：先过前面的。")
             return
@@ -113,7 +114,7 @@ object Game {
         phase = Phase.PLAYING
         music?.resume()
         Log.i(TAG, "begin ${stage.id}")
-        say("捏星球上的一块地方，它会转到你面前。")
+        say("先在右边面板上拿起一样东西，再看向星球捏一下放下。")
         version++
     }
 
@@ -131,13 +132,44 @@ object Game {
         version++
     }
 
-    /** A pinch on the planet: that tile comes to the front. */
+    /**
+     * What the hand holds, chosen from the tray (2026-11-09 review: choose the thing first, then
+     * where it goes). It stays in hand for more of the same until put down.
+     */
+    var holding by mutableStateOf<Build?>(null)
+
+    fun hold(b: Build?) {
+        holding = if (holding == b) null else b
+        sound?.play(Sfx.SELECT)
+        hoverTile?.let { hover(it) }
+        version++
+    }
+
+    /** The tile under the eye or the ray, while something is held (for the green or red ring). */
+    var hoverTile: Int? = null; private set
+
+    fun hover(id: Int?) {
+        hoverTile = id
+        val p = play
+        val b = holding
+        if (p == null || b == null || id == null || phase != Phase.PLAYING) { view?.hover(null, false); return }
+        val ok = synchronized(lock) { p.tiles.getOrNull(id)?.let { p.canBuild(b, it) == null } } ?: false
+        view?.hover(id, ok)
+    }
+
+    /** A pinch on the planet: with something in hand it goes there; else the tile is chosen (to look or to clear). */
     fun tile(id: Int) {
         val p = play ?: return
         if (phase != Phase.PLAYING) return
         synchronized(lock) { p.select(id) }
         view?.face(id)
-        sound?.play(Sfx.SELECT)
+        val b = holding
+        if (b != null) {
+            synchronized(lock) { p.build(b, id) }
+            hover(id)
+        } else {
+            sound?.play(Sfx.SELECT)
+        }
         version++
     }
 

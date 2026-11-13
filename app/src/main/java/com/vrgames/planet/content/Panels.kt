@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -115,7 +117,7 @@ fun CardPanel(c: PhysicalLengthConverter) {
         Text("掌心星球", fontSize = c.sz(0.046f), color = Star)
         Text("一颗小星球在你面前。种下森林，放进鲸群，建起城市，看气候怎么变，最后把火箭送上天。", fontSize = c.sz(0.018f), color = Ink)
         Text("怎么玩", fontSize = c.sz(0.02f), color = Mint)
-        Text("· 看向星球上一块地方捏一下，它会转到你面前。\n· 再按右边面板上想造的东西。\n· 城市越多气温越高：一边发展，一边种树。", fontSize = c.sz(0.0165f), color = Ink)
+        Text("· 每一关要做什么，写在左边的面板上：玩的时候记得看左边。\n· 先在右边面板上拿起想造的东西。\n· 再看向星球捏一下放下：绿圈能放，红圈不能。\n· 捏住星球拖动，或捏住后转手腕，星球就跟着转。\n· 城市越多气温越高：一边发展，一边种树。", fontSize = c.sz(0.0165f), color = Ink)
         if (Game.stars > 0) Text("已得 ${Game.stars} / ${Game.maxStars} 颗星", fontSize = c.sz(0.016f), color = Mint)
         Row(horizontalArrangement = Arrangement.spacedBy(c.m(0.01f)), verticalAlignment = Alignment.CenterVertically) {
             CallToAction(c, if (Game.stars > 0) "接着造 →" else "创世 →") { Game.start() }
@@ -182,32 +184,50 @@ fun HudPanel(c: PhysicalLengthConverter, toggle: (String) -> Unit) {
 }
 
 /** What can be built on the tile in front. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BuildPanel(c: PhysicalLengthConverter) {
     Glass(c, 0.35f, 0.36f) {
         Game.version
         val p = Game.play ?: return@Glass
-        val t = p.selected?.let { p.tiles[it] }
-        Text(
-            when {
-                t == null -> "捏星球上的一块地方"
-                t.build != null -> if (t.city) "这里：城市" else "这里：${t.build?.title}"
-                t.terrain == Terrain.OCEAN -> "这里：海洋"
-                t.terrain == Terrain.VOLCANO -> "这里：火山"
-                t.terrain == Terrain.MOUNTAIN -> "这里：雪山"
-                else -> "这里：空地"
-            },
-            fontSize = c.sz(0.02f), color = Star,
-        )
-        for (b in Build.entries) {
-            val open = p.era.ordinal >= b.needs.ordinal
-            if (!open) continue
-            val why = t?.let { p.canBuild(b, it) }
-            val ok = t != null && why == null
-            Pill(c, "${b.title}　${b.cost} 点", if (ok) Mint else Dim) { Game.build(b) }
-            if (ok) Text(b.line, fontSize = c.sz(0.0125f), color = Dim)
+        val held = Game.holding
+        // First the thing, then where it goes (2026-11-09 review).
+        if (held != null) {
+            Text("手上：${held.title}　${held.cost} 点", fontSize = c.sz(0.02f), color = Star)
+            Text("看向星球，捏一下放下：绿圈能放，红圈不能。${held.line}", fontSize = c.sz(0.0125f), color = Ink)
+        } else {
+            Text("先在下面拿一样东西", fontSize = c.sz(0.02f), color = Star)
+            Text("捏住星球拖动，或捏住后转动手腕，都能转星球。", fontSize = c.sz(0.0125f), color = Dim)
+            // The level's goals are on the left panel; eyes stay on the planet and this panel (device test 2026-11-12).
+            Text("← 这一关的任务在左边面板上，记得看一眼", fontSize = c.sz(0.0135f), color = Star)
         }
-        if (t?.build != null) Pill(c, "拆掉（退一半点数）", Alarm) { Game.clearTile() }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(c.m(0.006f)), verticalArrangement = Arrangement.spacedBy(c.m(0.005f)), maxItemsInEachRow = 3) {
+            for (b in Build.entries) {
+                if (p.era.ordinal < b.needs.ordinal) continue
+                val color = when {
+                    b == held -> Mint
+                    p.credits >= b.cost -> Ink
+                    else -> Dim
+                }
+                Pill(c, (if (b == held) "✓ " else "") + "${b.title} ${b.cost}", color) { Game.hold(b) }
+            }
+        }
+        if (held != null) Pill(c, "放下手上的", Dim) { Game.hold(null) }
+        // The tile last pinched with nothing in hand: what is there, and taking it down.
+        val t = if (held == null) p.selected?.let { p.tiles[it] } else null
+        if (t != null) {
+            Text(
+                when {
+                    t.build != null -> if (t.city) "这里：城市" else "这里：${t.build?.title}"
+                    t.terrain == Terrain.OCEAN -> "这里：海洋"
+                    t.terrain == Terrain.VOLCANO -> "这里：火山"
+                    t.terrain == Terrain.MOUNTAIN -> "这里：雪山（只能建水电站）"
+                    else -> "这里：空地"
+                },
+                fontSize = c.sz(0.015f), color = Star,
+            )
+            if (t.build != null) Pill(c, "拆掉（退一半点数）", Alarm) { Game.clearTile() }
+        }
     }
 }
 

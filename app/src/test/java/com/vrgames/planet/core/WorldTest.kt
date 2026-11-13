@@ -111,11 +111,11 @@ class WorldTest {
     @Test
     fun theTilesCoverTheSphereWithNoCrowding() {
         val p = Play(Stages.byId("a1"))
-        assertEquals(36, p.tiles.size)
+        assertEquals(Play.TILES, p.tiles.size)
         for (t in p.tiles) {
             val nearest = p.tiles.filter { it !== t }.minOf { o -> kotlin.math.acos((t.x * o.x + t.y * o.y + t.z * o.z).coerceIn(-1.0, 1.0)) }
-            // At a 22 cm planet, a pinch box as wide as this subtends enough to aim at, from 0.7 m.
-            assertTrue("$nearest", nearest * 0.22 / 0.7 > Math.toRadians(4.0))
+            // At a 30 cm planet, a pinch box as wide as this subtends enough to aim at, from 1.15 m.
+            assertTrue("$nearest", nearest * 0.30 / 1.15 > Math.toRadians(4.0))
         }
     }
 
@@ -136,5 +136,28 @@ class WorldTest {
             worst = maxOf(worst, nearest)
         }
         assertTrue("the farthest point is $worst from a tile, boxes reach $pad", worst < pad)
+    }
+
+    @Test
+    fun theNewThingsHaveTheirPlaces() {
+        val p = Play(Stages.byId("d3"))
+        val mountain = p.tiles.first { it.terrain == Terrain.MOUNTAIN }
+        val sea = p.tiles.first { it.terrain == Terrain.OCEAN }
+        val inland = p.tiles.firstOrNull { it.terrain == Terrain.LAND && !p.coastal(it) }
+        // A hydro station only on a mountain; reefs only at sea; nothing else on a mountain.
+        assertEquals("水电站要建在雪山上。", p.canBuild(Build.HYDRO, sea))
+        assertEquals("雪山上只能建水电站。", p.canBuild(Build.FOREST, mountain))
+        assertEquals("珊瑚礁要放在海里。", p.canBuild(Build.REEF, p.tiles.first { it.terrain == Terrain.LAND }))
+        if (inland != null) assertEquals("红树林要建在挨着海的陆地上。", p.canBuild(Build.MANGROVE, inland))
+    }
+
+    @Test
+    fun aReefBleachesInAWarmSea() {
+        val p = Play(Stages.byId("d2"))
+        val sea = p.tiles.first { it.terrain == Terrain.OCEAN }
+        assertTrue(p.build(Build.REEF, sea.id))
+        // A very warm sun: the sea stays over 22 degrees until the reef is gone.
+        repeat(4000) { if (sea.build == Build.REEF) p.step(Play.STEP) { p.debugHeat(30.0) } }
+        assertTrue(sea.build == null)
     }
 }
